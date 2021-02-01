@@ -1,0 +1,4 @@
+__pycache__/
+*.epub
+/notes.py
+Pipfile*
