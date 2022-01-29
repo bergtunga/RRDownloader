@@ -6,7 +6,7 @@ The goal of this project is to create .epub v3 files that are compatible with v2
 ## Requirements
 This requires the requests library as well as beautifulsoup4 to be installed to run. These can be installed by running
 ```shell
-$ git clone https://github.com/Goobabtc/RRDownloader.git
+$ git clone https://github.com/bergtunga/RRDownloader.git
 Cloning into 'RRDownloader'...
 
 $ cd RRDownloader/
