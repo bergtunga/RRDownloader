@@ -165,6 +165,11 @@ class book_downloader:
 </rootfiles>\
 </container>"""
     
+    _BROKEN_IMAGE_TEXT_START = """<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchBucket"""
+    _brokenImage = None
+    with open("brokenImage.jpg", "rb") as image:
+        _brokenImage = image.read()
+
     def __init__(self, book_num, single_chapter = -1):
         print("Finding", book_num)
         url = "https://www.royalroad.com/fiction/" + str(book_num)
@@ -405,6 +410,8 @@ class book_downloader:
         # If already retrieved, return.
         
         ext = os.path.splitext(rsc_addr)[1]
+        # split extension
+
         if ext == ".png":
             media_close = '" media-type="image/png" />\n'
         elif ext == ".gif":
@@ -421,16 +428,17 @@ class book_downloader:
         try:
             resource = requests.get(rsc_addr).content
             # Get the resource
+            
+            if str(resource)[2:100].startswith(book_downloader._BROKEN_IMAGE_TEXT_START):
+                resource = book_downloader._brokenImage
+            
         except requests.exceptions.ConnectionError as ce:
-            with open("brokenImage.jpg", "rb") as image:
-                resource = image.read()
+            resource = book_downloader._brokenImage
             #if the image cannot be loaded, use a broken image icon
             print("Unable to retrieve image: ", rsc_addr)
         
         self._epub_file.writestr('OEBPS/' + name, resource)
         
-        
-
         self._manifest_addition = self._manifest_addition + \
                                  ' <item id="'+identity+'" href="'+ name + media_close
         # Add to manifest
