@@ -174,9 +174,12 @@ class book_downloader:
         except:
             pass
         if page is None:
-            raise ConnectionError("Unable to connect to server.")
+            raise ConnectionError('Unable to connect to server.\nCheck your internet connection and try again.')
         if page.status_code == 404:
             raise RuntimeError("Story "+book_num+" does not exist.")
+        if page.status_code == 522:
+            raise ConnectionError("Royal Road is down")
+
 
         chapter.reset_class()
 
@@ -288,7 +291,9 @@ class book_downloader:
         ###########################################################
 
         # Cover ###################################################
-        cover_addr = title_soup.find('img', class_="img-offset thumbnail inline-block").attrs['src']
+        
+        cover_addr = title_soup.find("div", class_ ="cover-art-container").img.attrs['src']
+        #title_soup.find('img', class_="img-offset thumbnail inline-block").attrs['src']
         img_name = self._retrieve_image(cover_addr)[0]
         #   Get cover
         
@@ -390,8 +395,10 @@ class book_downloader:
             return None
         if rsc_addr[0] == "/" :
             rsc_addr = "https://www.royalroad.com" + rsc_addr
-        rsc_addr = rsc_addr.partition('?')[0]
-        # Sanitize address
+        
+        if not '.gstatic.com/images?' in rsc_addr:
+            rsc_addr = rsc_addr.partition('?')[0]
+            # Sanitize address, unless hosted on gstatic.
         
         if rsc_addr in self._images:
             return self._images[rsc_addr]
@@ -410,9 +417,20 @@ class book_downloader:
         
         name = "Images/" + str(len(self._images)) + ext
         identity = "img" + str(len(self._images))
+        resource = ''
+        try:
+            resource = requests.get(rsc_addr).content
+            # Get the resource
+        except requests.exceptions.ConnectionError as ce:
+            with open("brokenImage.jpg", "rb") as image:
+                resource = image.read()
+            #if the image cannot be loaded, use a broken image icon
+            print("Unable to retrieve image: ", rsc_addr)
         
-        self._epub_file.writestr('OEBPS/' + name, requests.get(rsc_addr).content)
-        # Get and write the resource
+        self._epub_file.writestr('OEBPS/' + name, resource)
+        
+        
+
         self._manifest_addition = self._manifest_addition + \
                                  ' <item id="'+identity+'" href="'+ name + media_close
         # Add to manifest
