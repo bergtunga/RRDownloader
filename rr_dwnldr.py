@@ -201,9 +201,9 @@ class book_downloader:
 
         self.url = url
         self.author = title_soup.find('meta', property="books:author").attrs['content']
-            # Get the author of the book.
-        self.description = title_soup.find(property="description").text.strip()
-            # Get the description of the book.
+        # Get the author of the book.
+        self.description = title_soup.find(class_="description").text.strip()
+        # Get the description of the book.
         self.book_name = title_soup.title.string[:-13]  # Get name of the book from page title.
         self.book_num = book_num
         self.save_name = None
@@ -239,15 +239,16 @@ class book_downloader:
             print("Downloading chapter from index", single_chapter,
                   "of book", self.book_name, "From RoyalRoad")
         # Notify user of what's happening
-        
+
         # File Creation & Metadata ################################
         i = 0
+        sanitizedName = re.sub(r"""['"{}\/\\<>`!@#$%&*\-_+\s|?=:]+""", ' ', self.book_name, 1000000)
         while self._epub_file is None:
             try:
                 if i == 0 :
-                    self.save_name = self.book_name + ".epub"
+                    self.save_name = sanitizedName + ".epub"
                 else:
-                    self.save_name = self.book_name+str(i) + ".epub"
+                    self.save_name = sanitizedName+str(i) + ".epub"
                 self._epub_file = zipfile.ZipFile(self.save_name, 'w',
                                     compression=zipfile.ZIP_DEFLATED,
                                     compresslevel=6)
@@ -262,6 +263,7 @@ class book_downloader:
                 else:
                     raise
         # Assign self.save_name, self._epub_file.
+        print('making epup:' + self._epub_file.filename);
         
         self._epub_file.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
         #   mimetype cannot be compressed.
@@ -428,7 +430,7 @@ class book_downloader:
         try:
             resource = requests.get(rsc_addr).content
             # Get the resource
-            
+            print("Royal Road image broken: ", rsc_addr)
             if str(resource)[2:100].startswith(book_downloader._BROKEN_IMAGE_TEXT_START):
                 resource = book_downloader._brokenImage
             

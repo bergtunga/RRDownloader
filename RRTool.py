@@ -7,7 +7,9 @@ import subprocess
 import rr_dwnldr
 
 def main():
-    if len(sys.argv) == 1:
+    # argumentList = ['', '-d', '12345']
+    argumentList = sys.argv
+    if len(argumentList) == 1:
         """
         Print help
         """
@@ -18,36 +20,36 @@ def main():
         print('\t-do ##### to download and open book')
         print('\t-s # can be specified after a download option to only retrieve one chapter')
         print('The number can be found after "fiction/" in the URL')
-    elif sys.argv[1] == '-l' or sys.argv[1] == '--list':
+    elif argumentList[1] == '-l' or argumentList[1] == '--list':
         list_books()
-    elif sys.argv[1] == '-d' or sys.argv[1] == '--download' or sys.argv[1] == '-do':
+    elif argumentList[1] == '-d' or argumentList[1] == '--download' or argumentList[1] == '-do':
         try:
-            if len(sys.argv) == 5:
-                if sys.argv[3] != '-s':
-                    print("Unexpected argument", sys.argv[3])
+            if len(argumentList) == 5:
+                if argumentList[3] != '-s':
+                    print("Unexpected argument", argumentList[3])
                 else:
                     err = False
                     i = None
                     try:
-                        i = int(sys.argv[4])
+                        i = int(argumentList[4])
                     except:
                         err = True
                     if err:
                         print("-s must specify an integer")
                     else:
-                        book = rr_dwnldr.book_downloader(sys.argv[2], i)
-                        if sys.argv[1] == '-do':
+                        book = rr_dwnldr.book_downloader(argumentList[2], i)
+                        if argumentList[1] == '-do':
                             open_sys(book.save_name)
-            elif len(sys.argv) == 4 and sys.argv[3] == '-s':
+            elif len(argumentList) == 4 and argumentList[3] == '-s':
                 print("-s must specify an integer")
-            elif len(sys.argv) != 3:
+            elif len(argumentList) != 3:
                 print("The download must include only the book ID")
             else:
-                book = rr_dwnldr.book_downloader(sys.argv[2])
-                if sys.argv[1] == '-do' :
+                book = rr_dwnldr.book_downloader(argumentList[2])
+                if argumentList[1] == '-do' :
                     open_sys(book.save_name)
-        except ConnectionError:
-            print('Unable to connect to server.\nCheck your internet connection and try again.')
+        except ConnectionError as e:
+            print(e.args[0])
         except RuntimeError:
             print("The story you entered does not exist!")
 
