@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" xmlns:opf="http://www.idpf.org/2007/opf" unique-identifier="BookID">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <dc:title>{book_name}</dc:title>
+ <dc:creator>{author}</dc:creator>
+ <dc:description>{description}</dc:description>
+ <dc:language>en-US</dc:language>
+ <dc:publisher>Royal Road</dc:publisher>
+ <dc:date>{date_updated}</dc:date>
+ <meta property="dcterms:modified">{date}</meta>
+ <dc:identifier id="BookID">ID:{book_num}</dc:identifier>
+</metadata>
+<manifest>
+ <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml" />
+ <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" />
+ <item id="toc" properties="nav" href="toc.xhtml" media-type="application/xhtml+xml" />
+ <item id="index" href="index.xhtml" media-type="application/xhtml+xml" />
+{manifest_chapter_string}
+ <item id="RRStyle" href="Styles/RRStyle.css" media-type="text/css" />
+</manifest>
+<spine toc="ncx">
+ <itemref idref="cover"/>
+ <itemref idref="index"/>
+ <itemref idref="toc"/>{spine_string}
+</spine>
+<guide>
+ <reference title="Cover page" type="cover" href="cover.xhtml"/>
+ <reference title="Index" type="index" href="cover.xhtml"/>
+ <reference title="Table of contents" type="toc" href="toc.xhtml"/>
+</guide>
+</package>
