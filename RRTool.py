@@ -4,59 +4,37 @@ import os
 import pathlib
 import platform
 import subprocess
+import argparse
 from source.rr_dwnldr import BookDownloader
 
-def main():
+def main() -> None:
     '''Start me from the command line. Either provide "arguments" in-code or from cmd line'''
-    # argumentList = ['', '-d', '12345']
-    argumentList = sys.argv # TODO: bring in argument parser
-    if len(argumentList) == 1:
-        # Print help
-        print('This is used to download stories from RoyalRoad.com')
-        print('Use:python RRTool.py [-l] [-d ##### [-s #]]')
-        print('\t-l or --list to list books in current directory')
-        print('\t-d or --download ##### to download book')
-        print('\t-do ##### to download and open book')
-        print('\t-s # can be specified after a download option to only retrieve one chapter')
-        print('The number can be found after "fiction/" in the URL')
-    elif argumentList[1] == '-l' or argumentList[1] == '--list':
+    parser = bootstrap_arguments()
+    args = parser.parse_args()
+    #args = parser.parse_args(['d', '12345'])
+    if args.op is None:
+        parser.print_help()
+        return
+    if args.op in ('l', 'list'):
         list_books()
-    elif argumentList[1] == '-d' or argumentList[1] == '--download' or argumentList[1] == '-do':
+        return
+    if args.op in ('download', 'd'):
+        specific_chapter = -1 if 'single' not in vars(args) else 0 if args.single is None else args.single
         try:
-            if len(argumentList) == 5:
-                if argumentList[3] != '-s':
-                    print('Unexpected argument', argumentList[3])
-                else:
-                    err = False
-                    i = None
-                    try:
-                        i = int(argumentList[4])
-                    except:
-                        err = True
-                    if err:
-                        print('-s must specify an integer')
-                    else:
-                        book = BookDownloader(argumentList[2], i)
-                        if argumentList[1] == '-do':
-                            open_sys(book.save_name)
-            elif len(argumentList) == 4 and argumentList[3] == '-s':
-                print('-s must specify an integer')
-            elif len(argumentList) != 3:
-                print('The download must include only the book ID')
-            else:
-                book = BookDownloader(argumentList[2])
-                if argumentList[1] == '-do' :
-                    open_sys(book.save_name)
-        except ConnectionError as e:
-            print(e.args[0])
+            book = BookDownloader(args.id, specific_chapter)
+        except ConnectionError as c_e:
+            print(c_e.args[0])
         except RuntimeError:
             print('The story you entered does not exist!')
+        if args.open:
+            open_sys(book.save_name)
+        return
+    print('unexpected error: unrecognized operation')
+    return
 
-def list_books():
+def list_books() -> None:
     books_tmp = pathlib.Path().glob('*.epub')
-    books = []
-    for i in books_tmp:
-        books.append(i)
+    books = list(books_tmp)
     if len(books) == 0 :
         print("You haven't downloaded any books!")
     else:
@@ -78,9 +56,9 @@ def list_books():
                     print('Enter a number')
 
         if i != -2 :
-            open_sys(books[i])
+            open_sys(str(books[i]))
 
-def open_sys(file):
+def open_sys(file: str) -> None:
     opsys = platform.system()
 
     if opsys == 'Linux':
@@ -90,10 +68,52 @@ def open_sys(file):
         # Untested
         subprocess.call(('open', file))
     elif opsys == 'Windows':
-        os.startfile(file)
+        os.startfile(file) # type: ignore[attr-defined]
     else:
         print('System type unsupported - assuming *nix varient')
         subprocess.call(('xdg-open', file))
 
+def bootstrap_arguments() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog='RRTool.py',
+        usage='pipenv run %(prog)s',
+        description='Download stories from RoyalRoad.com'
+    )
+    subparsers = parser.add_subparsers(
+        title='usage',
+        description='this can be used to list epubs in the current directory or to download and create a new epub',
+        help='list or download',
+        metavar='download|list',
+        dest='op')
+    download = subparsers.add_parser(
+        'download',
+        prog='download',
+        aliases=['d'],
+        help='downloads a book from RoyalRoad and saves as an epub'
+    )
+    subparsers.add_parser(
+        'list',
+        prog='list',
+        aliases=['l'],
+        help='list books in current directory'
+    )
+    download.add_argument(
+        '-o', '--open',
+        action='store_true',
+        help='open after downloading. Only valid with -d option'
+    )
+    download.add_argument(
+        '-s', '--single',
+        metavar='index',
+        nargs='?',
+        type=int,
+        default=argparse.SUPPRESS,
+        help='only download one chapter (defaults to first chapter)'
+    )
+    download.add_argument(
+        'id',
+        help='id can be found after "fiction/" in the URL'
+    )
+    return parser
 
 main()

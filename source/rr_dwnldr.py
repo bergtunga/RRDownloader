@@ -2,28 +2,60 @@
 import os
 import string
 import re
+from typing import Callable
 import requests
 from bs4 import BeautifulSoup as bs
+from requests import Response
 from source.epub_writer import EpubWriter
 
-def _from_file(name):
-    result = None
+def _from_file(name: str) -> str:
+    result: str | None = None
     with open('./assets/' + name, mode='r', encoding='UTF-8') as stream:
         result = stream.read()
-    return result
+    if result is not None:
+        return result
+    raise Exception('File missing', name)
 
-def scrape(url):
-    return requests.get(url, timeout=30)
+def scrape(url: str) -> requests.Response:
+    '''gets a resource, with a default timeout'''
+    problem: Exception|None = None
+    response: Response|None = None
+    try:
+        response = requests.get(url, timeout=30)
+    except Exception as issue:
+        problem = issue
+    if response is None:
+        raise ConnectionError(
+            'Unable to connect to server.\nCheck your internet connection and try again.'
+        ) from problem
+    if response.status_code == 404:
+        raise RuntimeError('Missing net resource.', url) from problem
+    if response.status_code == 522:
+        raise ConnectionError('Royal Road is down') from problem
+    return response
+
+
+def _find_val_suppress(closure: Callable[[], str], error_string: str|None = None) -> str | None:
+    try:
+        return closure()
+    except AttributeError:
+        if error_string is not None:
+            print(error_string)
+        return None
+
+class LocalizedException(Exception):
+    pass
+
 
 class Chapter:
     '''Functional class. Total garbage'''
-    _id_list = []
+    _id_list: list = []
 
     @staticmethod
-    def reset_class():
+    def reset_class() -> None:
         Chapter._id_list = []
 
-    def __init__(self, name, url):
+    def __init__(self, name: str, url: str) -> None:
         self.url = 'https://www.royalroad.com' + url
         self.name = str(name).strip()
         self.sanitized_name = sanitized_name_temp = re.sub(r'[\W]+', '_', self.name)
@@ -35,27 +67,34 @@ class Chapter:
             self.sanitized_name = sanitized_name_temp+'_' + str(i)
         Chapter._id_list.append(self.sanitized_name)
         # Then ensure no conficts for internal IDs.
-        self.soup = None
+        self.soup: bs
+        self.data_soup: bs
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return str(self)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return 'Chapter ' + self.name + ' @ ' + str(self.url)
 
-    def get_author_info(self):
+    def get_author_info(self) -> tuple[str|None,str|None]:
         if self.data_soup is None:
             raise Exception('Data not yet retrieved')
         soup = self.data_soup
-        tag = soup.find('i', class_='fa fa-info-circle')
+        tag = _find_val_suppress(
+            lambda: soup.find('i', class_='fa fa-info-circle').tag.parent.text # type: ignore[union-attr]
+        )
         #This finds the information circle icon that preceeds the bio.
-        bio = tag.parent.text.strip()
-        if bio == 'Bio:' :
+        bio: str|None
+        if tag is None or tag == 'Bio:':
             bio = None
-        img = soup.find('div', class_='avatar-container-general').img.attrs['src']
+        else:
+            bio = tag.strip()
+        img: str|None = _find_val_suppress(
+            lambda: soup.find('div', class_='avatar-container-general').img.attrs['src'] # type: ignore[union-attr]
+        )
         return (bio, img)
 
-    def get_data(self):
+    def get_data(self) -> None:
         data = scrape(self.url)
         soup = self.data_soup = bs(data.text, 'html.parser')
         #   Retrieve webpage & make soup
@@ -67,9 +106,15 @@ class Chapter:
 
         soup = self.soup = bs(_from_file('basic.xhtml'),'html.parser')
         #   Once contents are isolated, get the template xhtml document
+        soup_div = soup.div
+        if soup_div is None or soup.title is None:
+            raise LocalizedException('basic.xhtml is invalid')
+        if content is None:
+            print('Unable to find content for chapter', self.sanitized_name)
+            content = soup.new_tag('div')
 
         if len(notes) == 0:
-            soup.div.replace_with(content)
+            soup_div.replace_with(content)
         elif len(notes) == 1:
             tag = soup.new_tag('div')
             # Make a new tag for the chapter content and both author's notes
@@ -88,21 +133,21 @@ class Chapter:
                 tag.append(notes[0])
                 # Otherwise, add the note after the chapter content.
 
-            soup.div.replace_with(tag)
+            soup_div.replace_with(tag)
             # Add the tag with the chapter data.
         else: #elif len(notes) == 2
             tag = soup.new_tag('div')
             tag.append(notes[0])
             tag.append(content)
             tag.append(notes[1])
-            soup.div.replace_with(tag)
+            soup_div.replace_with(tag)
 
         soup.title.string = self.name
         #   Substitute the content and name into the template
 
         #   Now the content of the chapter can be accessed from chapter.soup
 
-    def write_data(self):
+    def write_data(self) -> None:
         if self.soup is None:
             raise Exception('Data not yet retrieved')
         with open(
@@ -122,51 +167,41 @@ class BookDownloader:
     with open('./assets/brokenImage.jpg', 'rb') as image:
         _brokenImage = image.read()
 
-    def __init__(self, book_num, single_chapter = -1):
+    def __init__(self, book_num: str, single_chapter: int = -1) -> None:
         print('Finding', book_num)
-        url = 'https://www.royalroad.com/fiction/' + str(book_num)
-        page = None
-        try:
-            page = scrape(url)
-        except:
-            pass
-        if page is None:
-            raise ConnectionError(
-                'Unable to connect to server.\nCheck your internet connection and try again.'
-            )
-        if page.status_code == 404:
-            raise RuntimeError('Story '+book_num+' does not exist.')
-        if page.status_code == 522:
-            raise ConnectionError('Royal Road is down')
-
-
         Chapter.reset_class()
-
-        self.single_chapter = single_chapter
-        # Integers initialized
-
-        title_soup = bs(page.text, 'html.parser')       # Get the webpage of the indicated book.
-        self._chapter_list = []                         # List of chapters
-        self._toc_soup = None                           # BeautifulSoup for Table of Contents
-        self._images = dict()                           # Dictionary of images in book
-        self.author_info = None                         # Tuple ( bio, image_address)
-        # Objects Initialized
-
-        self.url = url
-        self.author = title_soup.find('meta', property='books:author').attrs['content']
-        # Get the author of the book.
-        self.description = title_soup.find(class_='description').text.strip()
-        # Get the description of the book.
-        self.book_name = title_soup.title.string[:-13]  # Get name of the book from page title.
+        self.url = 'https://www.royalroad.com/fiction/' + str(book_num)
         self.book_num = book_num
-        self.save_name = None
+        self.single_chapter = single_chapter
+        self._chapter_list: list[Chapter] = []        # List of chapters
+        self._toc_soup: bs                            # BeautifulSoup for Table of Contents
+        self._images: dict[str, tuple[str, str]] = {} # Dictionary of images in book
+        self.author_info = None                       # Tuple ( bio, image_address)
         self._date_updated = None
-        # Strings Initialized
+
+        page = scrape(self.url)
+        title_soup = bs(page.text, 'html.parser')     # Get the webpage of the indicated book.
+        self.author = _find_val_suppress(
+            lambda: title_soup.find('meta', property='books:author').attrs['content'], # type: ignore[union-attr]
+            'Unable to find author'
+        )
+        self.description = _find_val_suppress(
+            lambda: title_soup.find(class_='description').text.strip(), # type: ignore[union-attr]
+            'Unable to find book description'
+        )
+        some_name = _find_val_suppress(
+            lambda: str(title_soup.title.string), # type: ignore[union-attr]
+            'unable to find title'
+        )
+        if some_name is not None:
+            self.book_name = some_name[:-13]
+
         self._epub_writer = EpubWriter(self.book_name)
 
-        # All variables are now initialized
-
-        table = title_soup.table.find_all('td')
+        if title_soup.table is not None:
+            table = title_soup.table.find_all('td')
+        else:
+            raise Exception('Unable to parse page; no chapters found')
         for row in table[::2]:
             self._chapter_list.append(Chapter(row.text, row.find('a').get('href')))
         #   Get the chapters of the book by searching the table data.
@@ -185,37 +220,39 @@ class BookDownloader:
         # Go through the table data, and grab the date of the latest data. Then format appropiately.
 
         if single_chapter == -1:
-            print('Downloading', len(self._chapter_list), 'chapters of book', self.book_name, 'from RoyalRoad')
+            print(
+                'Downloading',
+                len(self._chapter_list),
+                'chapters of book',
+                self.book_name,
+                'from RoyalRoad'
+            )
         else:
             print('Downloading chapter from index', single_chapter,
                   'of book', self.book_name, 'From RoyalRoad')
-        # Notify user of what's happening
 
-        self._epub_writer.create()
+        self.save_name = self._epub_writer.create()
 
         # Chapter Retrieval #######################################
         self._toc_soup = bs(_from_file('toc.xhtml'), 'html.parser')
-        # Create the Table of Contents file
-        if single_chapter != -1 :
-            item = self._chapter_list[single_chapter]
-            self._do_chapter(item)
-            self.author_info = item.get_author_info()
-        else :
-            i = 0
-            for item in self._chapter_list:
-                self._do_chapter(item, place = i)
-                i += 1
-            self.author_info = self._chapter_list[0].get_author_info()
-        #   The chapter contents are now written
+        i = 0
+        for item in self._chapter_list:
+            self._do_chapter(item, place = i)
+            i += 1
+        self.author_info = self._chapter_list[0].get_author_info()
         self._epub_writer.write_toc(self._toc_soup.prettify())
-        #   Add table of contents to epub
         ###########################################################
 
         self._epub_writer.write_style()
 
         # Cover ###################################################
-        cover_addr = title_soup.find('div', class_ ='cover-art-container').img.attrs['src']
-        img_name = self._retrieve_image(cover_addr)[0]
+        cover_addr = _find_val_suppress(
+            lambda: title_soup.find('div', class_ ='cover-art-container').img.attrs['src'],  # type: ignore[union-attr]
+            'unable to find cover'
+        )
+        img_name = None
+        if cover_addr is not None:
+            img_name = self._retrieve_image(cover_addr)[0]
         #   Get cover
 
         self._epub_writer.write_cover(img_name)
@@ -223,33 +260,28 @@ class BookDownloader:
         ###########################################################
 
         img_address = self.author_info[1]
-        author_image = self._retrieve_image(img_address)[0]
+        author_image = None if img_address is None else self._retrieve_image(img_address)[0]
         self._epub_writer.write_index(self.author, self.author_info[0], author_image)
         self._epub_writer.write_metadata(self.author,self.description, book_num, self._date_updated)
         self._epub_writer.close()
 
-    def _do_chapter(self, chapter, place = 0):
+    def _do_chapter(self, chapter: Chapter, place: int = 0) -> None:
         if self.single_chapter == -1 :
             print('Getting index '+str(place) + '/' + str(len(self._chapter_list)-1),
                   'chapter', chapter.name)
         else:
             print('Getting chapter', chapter.name)
         chapter.get_data()
-        self._epub_writer.push_chapter('', chapter.name, chapter.sanitized_name, place)
-        # Prep chapter-specific data for manifest, spine, and navigation.
 
-        chapter_tag = self._toc_soup.new_tag('li')
-        chapter_link_tag = self._toc_soup.new_tag('a', href=(chapter.sanitized_name+'.xhtml'))
-        chapter_link_tag.append(chapter.name)
-        chapter_tag.append(chapter_link_tag)
-        self._toc_soup.ol.append('\n')
-        self._toc_soup.ol.append(chapter_tag)
-        # Add to Table of Contents
+        self._epub_writer.push_chapter('', chapter.name, chapter.sanitized_name, place)
+        self._push_toc(chapter)
+
         imgs = chapter.soup.find_all('img')
         # Get all the images in the chapter
         for img_tag in imgs:
             # Process every image
             if 'src' not in img_tag.attrs:
+                print('Warning: img without src')
                 continue # if there isn't an image, skip
 
             img_tag.attrs['src'] = self._retrieve_image(img_tag.attrs['src'])[0]
@@ -257,9 +289,17 @@ class BookDownloader:
         # All images have now been processed.
         self._epub_writer.write_chapter(chapter.sanitized_name, chapter.soup.prettify())
 
-    def _retrieve_image(self, rsc_addr):
-        if rsc_addr is None:
-            return None
+    def _push_toc(self, chapter: Chapter) -> None:
+        chapter_tag = self._toc_soup.new_tag('li')
+        chapter_link_tag = self._toc_soup.new_tag('a', href=(chapter.sanitized_name+'.xhtml'))
+        chapter_link_tag.append(chapter.name)
+        chapter_tag.append(chapter_link_tag)
+        if self._toc_soup.ol is None:
+            raise LocalizedException('invalid toc')
+        self._toc_soup.ol.append('\n')
+        self._toc_soup.ol.append(chapter_tag)
+
+    def _retrieve_image(self, rsc_addr: str) -> tuple[str, str]:
         if rsc_addr[0] == '/' :
             rsc_addr = 'https://www.royalroad.com' + rsc_addr
 
@@ -286,7 +326,7 @@ class BookDownloader:
 
         name = 'Images/' + str(len(self._images)) + ext
         identity = 'img' + str(len(self._images))
-        resource = ''
+        resource: bytes|None
         try:
             resource = scrape(rsc_addr).content
             # Get the resource
@@ -299,13 +339,13 @@ class BookDownloader:
             resource = BookDownloader._brokenImage
             #if the image cannot be loaded, use a broken image icon
             print('Unable to retrieve image: ', rsc_addr)
-
-        self._epub_writer.write_resource(name, resource, identity, media_close)
+        if resource is not None:
+            self._epub_writer.write_resource(name, resource, identity, media_close)
 
         self._images[rsc_addr] = (name, identity)
         return self._images[rsc_addr]
 
-def month_number(month):
+def month_number(month: str) -> str:
     '''converts month str into 2 digit month'''
     switcher = {
         'January':'01',
