@@ -6,7 +6,7 @@ from typing import Callable
 import requests
 from bs4 import BeautifulSoup as bs
 from requests import Response
-from source.epub_writer import EpubWriter
+from source.epub_writer import EpubWriter, EpubImage, EpubChapter, TableOfContents, EpubCover
 
 def _from_file(name: str) -> str:
     result: str | None = None
@@ -56,6 +56,8 @@ class Chapter:
         Chapter._id_list = []
 
     def __init__(self, name: str, url: str) -> None:
+        self.data_soup: bs
+        self.soup: bs
         self.url = 'https://www.royalroad.com' + url
         self.name = str(name).strip()
         self.sanitized_name = sanitized_name_temp = re.sub(r'[\W]+', '_', self.name)
@@ -67,8 +69,6 @@ class Chapter:
             self.sanitized_name = sanitized_name_temp+'_' + str(i)
         Chapter._id_list.append(self.sanitized_name)
         # Then ensure no conficts for internal IDs.
-        self.soup: bs
-        self.data_soup: bs
 
     def __repr__(self) -> str:
         return str(self)
@@ -96,27 +96,27 @@ class Chapter:
 
     def get_data(self) -> None:
         data = scrape(self.url)
-        soup = self.data_soup = bs(data.text, 'html.parser')
+        self.data_soup = bs(data.text, 'html.parser')
         #   Retrieve webpage & make soup
 
-        content = soup.find('div', class_='chapter-inner chapter-content')
-        notes = soup.find_all('div', class_='portlet-body author-note')
+        content = self.data_soup.find('div', class_='chapter-inner chapter-content')
+        notes = self.data_soup.find_all('div', class_='portlet-body author-note')
         #   Get chapter contents
         #TODO: Fix 'spoilers' in notes, content
 
-        soup = self.soup = bs(_from_file('basic.xhtml'),'html.parser')
+        self.soup = bs(_from_file('BasicChapter.xhtml'),'html.parser')
         #   Once contents are isolated, get the template xhtml document
-        soup_div = soup.div
-        if soup_div is None or soup.title is None:
+        soup_div = self.soup.div
+        if soup_div is None or self.soup.title is None:
             raise LocalizedException('basic.xhtml is invalid')
         if content is None:
             print('Unable to find content for chapter', self.sanitized_name)
-            content = soup.new_tag('div')
+            content = self.soup.new_tag('div')
 
         if len(notes) == 0:
             soup_div.replace_with(content)
         elif len(notes) == 1:
-            tag = soup.new_tag('div')
+            tag = self.soup.new_tag('div')
             # Make a new tag for the chapter content and both author's notes
 
             test = notes[0].parent.next_sibling
@@ -136,29 +136,14 @@ class Chapter:
             soup_div.replace_with(tag)
             # Add the tag with the chapter data.
         else: #elif len(notes) == 2
-            tag = soup.new_tag('div')
+            tag = self.soup.new_tag('div')
             tag.append(notes[0])
             tag.append(content)
             tag.append(notes[1])
             soup_div.replace_with(tag)
 
-        soup.title.string = self.name
+        self.soup.title.string = self.name
         #   Substitute the content and name into the template
-
-        #   Now the content of the chapter can be accessed from chapter.soup
-
-    def write_data(self) -> None:
-        if self.soup is None:
-            raise Exception('Data not yet retrieved')
-        with open(
-            self.sanitized_name + '.xhtml',
-            mode='w',
-            encoding='utf-8'
-        ) as file:
-            file.write(self.soup.prettify())
-            #print(self.soup.prettify())
-
-        print(self.name + '.xhtml written')
 
 class BookDownloader:
     '''Another garbage functional class'''
@@ -173,10 +158,9 @@ class BookDownloader:
         self.url = 'https://www.royalroad.com/fiction/' + str(book_num)
         self.book_num = book_num
         self.single_chapter = single_chapter
-        self._chapter_list: list[Chapter] = []        # List of chapters
-        self._toc_soup: bs                            # BeautifulSoup for Table of Contents
-        self._images: dict[str, tuple[str, str]] = {} # Dictionary of images in book
-        self.author_info = None                       # Tuple ( bio, image_address)
+        self._chapter_list: list[Chapter] = []  # List of chapters
+        self._images: dict[str, EpubImage] = {} # Dictionary of images in book
+        self.author_info = None                 # Tuple ( bio, image_address)
         self._date_updated = None
 
         page = scrape(self.url)
@@ -209,7 +193,7 @@ class BookDownloader:
         for row in table[1::2]:
             try:
                 self._date_updated = row.time.attrs['title']
-            except:
+            except AttributeError:
                 pass
         if self._date_updated is not None:
             _d = self._date_updated.split()
@@ -234,47 +218,38 @@ class BookDownloader:
         self.save_name = self._epub_writer.create()
 
         # Chapter Retrieval #######################################
-        self._toc_soup = bs(_from_file('toc.xhtml'), 'html.parser')
+        self._toc = TableOfContents()
         i = 0
         for item in self._chapter_list:
             self._do_chapter(item, place = i)
             i += 1
         self.author_info = self._chapter_list[0].get_author_info()
-        self._epub_writer.write_toc(self._toc_soup.prettify())
-        ###########################################################
-
-        self._epub_writer.write_style()
+        self._epub_writer.push_item(self._toc)
 
         # Cover ###################################################
         cover_addr = _find_val_suppress(
-            lambda: title_soup.find('div', class_ ='cover-art-container').img.attrs['src'],  # type: ignore[union-attr]
+            lambda: title_soup.find('div', class_ ='cover-art-container').img.attrs['src'], # type: ignore[union-attr]
             'unable to find cover'
         )
         img_name = None
         if cover_addr is not None:
-            img_name = self._retrieve_image(cover_addr)[0]
+            img_name = self._retrieve_image(cover_addr).get_name()
         #   Get cover
 
-        self._epub_writer.write_cover(img_name)
-        #   Get cover file, edit, add to epub
-        ###########################################################
-
         img_address = self.author_info[1]
-        author_image = None if img_address is None else self._retrieve_image(img_address)[0]
-        self._epub_writer.write_index(self.author, self.author_info[0], author_image)
-        self._epub_writer.write_metadata(self.author,self.description, book_num, self._date_updated)
-        self._epub_writer.close()
+        author_image = None if img_address is None else self._retrieve_image(img_address).get_name()
+        self._epub_writer.push_item(EpubCover(img_name, self.book_name))
+        self._epub_writer.complete(self.author, self.author_info[0], author_image,self.description, book_num, self._date_updated)
 
     def _do_chapter(self, chapter: Chapter, place: int = 0) -> None:
         if self.single_chapter == -1 :
             print('Getting index '+str(place) + '/' + str(len(self._chapter_list)-1),
                   'chapter', chapter.name)
+        elif place != self.single_chapter:
+            return
         else:
             print('Getting chapter', chapter.name)
         chapter.get_data()
-
-        self._epub_writer.push_chapter('', chapter.name, chapter.sanitized_name, place)
-        self._push_toc(chapter)
 
         imgs = chapter.soup.find_all('img')
         # Get all the images in the chapter
@@ -284,22 +259,13 @@ class BookDownloader:
                 print('Warning: img without src')
                 continue # if there isn't an image, skip
 
-            img_tag.attrs['src'] = self._retrieve_image(img_tag.attrs['src'])[0]
+            img_tag.attrs['src'] = self._retrieve_image(img_tag.attrs['src']).get_name()
 
-        # All images have now been processed.
-        self._epub_writer.write_chapter(chapter.sanitized_name, chapter.soup.prettify())
+        epub_chapter = EpubChapter(chapter.name, chapter.sanitized_name, place, chapter.soup.prettify())
+        self._toc.push_chapter(epub_chapter)
+        self._epub_writer.push_item(epub_chapter)
 
-    def _push_toc(self, chapter: Chapter) -> None:
-        chapter_tag = self._toc_soup.new_tag('li')
-        chapter_link_tag = self._toc_soup.new_tag('a', href=(chapter.sanitized_name+'.xhtml'))
-        chapter_link_tag.append(chapter.name)
-        chapter_tag.append(chapter_link_tag)
-        if self._toc_soup.ol is None:
-            raise LocalizedException('invalid toc')
-        self._toc_soup.ol.append('\n')
-        self._toc_soup.ol.append(chapter_tag)
-
-    def _retrieve_image(self, rsc_addr: str) -> tuple[str, str]:
+    def _retrieve_image(self, rsc_addr: str) -> EpubImage:
         if rsc_addr[0] == '/' :
             rsc_addr = 'https://www.royalroad.com' + rsc_addr
 
@@ -314,18 +280,6 @@ class BookDownloader:
         ext = os.path.splitext(rsc_addr)[1]
         # split extension
 
-        if ext == '.png':
-            media_close = '" media-type="image/png" />\n'
-        elif ext == '.gif':
-            media_close = '" media-type="image/gif" />\n'
-        elif ext == '.svg':
-            media_close = '" media-type="image/svg+xml" />\n'
-        else: # Assume JPG otherwise
-            media_close = '" media-type="image/jpeg" />\n'
-        # Determine extension info.
-
-        name = 'Images/' + str(len(self._images)) + ext
-        identity = 'img' + str(len(self._images))
         resource: bytes|None
         try:
             resource = scrape(rsc_addr).content
@@ -335,14 +289,13 @@ class BookDownloader:
                 resource = BookDownloader._brokenImage
 
         except requests.exceptions.ConnectionError as error:
-            print(error)
             resource = BookDownloader._brokenImage
             #if the image cannot be loaded, use a broken image icon
-            print('Unable to retrieve image: ', rsc_addr)
+            print(error, 'Unable to retrieve image: ', rsc_addr)
         if resource is not None:
-            self._epub_writer.write_resource(name, resource, identity, media_close)
+            self._images[rsc_addr] = EpubImage(resource, ext, str(len(self._images)))
+            self._epub_writer.push_item(self._images[rsc_addr])
 
-        self._images[rsc_addr] = (name, identity)
         return self._images[rsc_addr]
 
 def month_number(month: str) -> str:
@@ -362,14 +315,3 @@ def month_number(month: str) -> str:
         'December':'12'
     }
     return switcher.get(month, '0')
-
-# chapter test
-"""
-test = chapter("Chapter 30: Demon Feast","/fiction/26534/vainqueur-the-dragon/chapter/417768/30-demon-feast")
-print(test)
-test.get_data()
-print(test.get_author_info())
-#test.write_data()
-#"""
-# book_downloader test
-# book_downloader("00000", 0)

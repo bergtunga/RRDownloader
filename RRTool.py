@@ -74,6 +74,7 @@ def open_sys(file: str) -> None:
         subprocess.call(('xdg-open', file))
 
 def bootstrap_arguments() -> argparse.ArgumentParser:
+    '''Sets up an argument parser for the tool'''
     parser = argparse.ArgumentParser(
         prog='RRTool.py',
         usage='pipenv run %(prog)s',
